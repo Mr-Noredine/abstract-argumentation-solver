@@ -91,75 +91,219 @@ def labeling_est_valide(labeling):
 4- Continuer jusqu'à stabilisation (fixpoint)
 5- Tous les arguments restants (non étiquetés) → à combiner (IN/OUT/UNDEC) avec brute-force réduite
 '''
+from collections import deque
 
-from itertools import product
+IN, OUT, UNDEC = "IN", "OUT", "UNDEC"
 
-def propagate_labels(arguments, attacks_by, attacks_from):
-    args_in = set()
-    args_out = set()
-    undecided = set(arguments)  # tous au début
+def _build_attacks_from(arguments, attacks_by):
+    """Construit attacks_from (attaquant -> cibles) à partir de attacks_by (cible -> attaquants)."""
+    attacks_from = {a: set() for a in arguments}
+    for target, attackers in attacks_by.items():
+        for attacker in attackers:
+            attacks_from.setdefault(attacker, set()).add(target)
+    return attacks_from
 
-    # Étape 1 : non attaqués → IN
-    for arg in arguments:
-        if arg not in attacks_by or not attacks_by[arg]:
-            args_in.add(arg)
 
-    # Étape 2 : propagation
-    changed = True
-    while changed:
-        changed = False
-        for arg in list(undecided):
-            if arg in args_in or arg in args_out:
+def propagate_labels(arguments, attacks_by, attacks_from, init_labels=None):
+    """
+    Propagation forte (fixpoint) avec déductions:
+    - si a est IN => tous ses attaquants OUT + toutes ses cibles OUT
+    - si a est OUT => au moins un attaquant IN (force si unique possibilité)
+    - si a est UNDEC => aucun attaquant IN et au moins un attaquant pas OUT (force UNDEC si unique possibilité)
+
+    Retour:
+      (labels_dict) si cohérent, sinon None
+    labels_dict: arg -> "IN"/"OUT"/"UNDEC" (pour ceux déjà décidés)
+    """
+    labels = {} if init_labels is None else dict(init_labels)  # copie
+    q = deque()
+
+    # On met tout dans la queue pour appliquer les règles "non étiqueté => déduction"
+    for a in arguments:
+        q.append(a)
+
+    def assign(a, v):
+        cur = labels.get(a)
+        if cur is None:
+            labels[a] = v
+            q.append(a)
+            # Les voisins impactés (ceux qui dépendent de a comme attaquant)
+            for t in attacks_from.get(a, ()):
+                q.append(t)
+            # Et ceux qui impactent a (ses attaquants) peuvent être forcés
+            for b in attacks_by.get(a, ()):
+                q.append(b)
+            return True
+        return cur == v  # False si contradiction
+
+    while q:
+        a = q.popleft()
+        attackers = attacks_by.get(a, set())
+        targets = attacks_from.get(a, set())
+        la = labels.get(a)
+
+        # --- Déductions même si a n'est pas encore labelisé ---
+        if la is None:
+            # Non-attaqué => IN
+            if not attackers:
+                if not assign(a, IN):
+                    return None
                 continue
-            attackers = attacks_by.get(arg, set())
-            if attackers.issubset(args_out):
-                # Tous ses attaquants sont OUT → arg est IN
-                args_in.add(arg)
-                changed = True
-            elif any(att in args_in for att in attackers):
-                # Un attaquant est IN → arg est OUT
-                args_out.add(arg)
-                changed = True
-        # Update undecided set
-        undecided = undecided - args_in - args_out
 
-    return args_in, args_out, undecided
+            # Si un attaquant est IN => a doit être OUT
+            if any(labels.get(b) == IN for b in attackers):
+                if not assign(a, OUT):
+                    return None
+                continue
 
-def generate_valid_labelings(arguments, attacks_by):
-    labelings = []
-    labels = ["IN", "OUT", "UNDEC"]
+            # Si tous les attaquants sont OUT => a doit être IN
+            if all(labels.get(b) == OUT for b in attackers):
+                if not assign(a, IN):
+                    return None
+                continue
 
-    # Construction de l'inverse : attacks_from
-    attacks_from = {}
-    for attacker, targets in attacks_by.items():
-        for target in targets:
-            if attacker not in attacks_from:
-                attacks_from[attacker] = set()
-            attacks_from[attacker].add(target)
+            # Sinon, pas de déduction immédiate
+            continue
 
-    # Propagation initiale
-    args_in, args_out, remaining_args = propagate_labels(arguments, attacks_by, attacks_from)
+        # --- Contraintes selon le label de a ---
+        if la == IN:
+            # Tous les attaquants doivent être OUT
+            for b in attackers:
+                lb = labels.get(b)
+                if lb is None:
+                    if not assign(b, OUT):
+                        return None
+                elif lb != OUT:
+                    return None
 
-    # Générer les combinaisons seulement sur les indécis restants
-    remaining_args = list(remaining_args)
-    for combo in product(labels, repeat=len(remaining_args)):
-        in_set = set(args_in)
-        out_set = set(args_out)
-        undec_set = set()
+            # Tous les successeurs (cibles) doivent être OUT (car attaqués par un IN)
+            for t in targets:
+                lt = labels.get(t)
+                if lt is None:
+                    if not assign(t, OUT):
+                        return None
+                elif lt != OUT:
+                    return None
 
-        for arg, label in zip(remaining_args, combo):
-            if label == "IN":
-                in_set.add(arg)
-            elif label == "OUT":
-                out_set.add(arg)
-            else:
-                undec_set.add(arg)
+        elif la == OUT:
+            # OUT => doit avoir au moins un attaquant IN
+            if not attackers:
+                return None  # impossible d'être OUT sans attaquant
 
-        labeling = (in_set, out_set, undec_set)
-        if labeling_est_valide(labeling):
-            labelings.append(labeling)
+            if any(labels.get(b) == IN for b in attackers):
+                continue  # déjà satisfait
 
-    return labelings
+            # candidats possibles pour devenir IN : ceux non assignés uniquement
+            candidates = [b for b in attackers if labels.get(b) is None]
+            if not candidates:
+                return None  # tous assignés, aucun IN => contradiction
+
+            # Si un seul candidat reste, on le force IN
+            if len(candidates) == 1:
+                if not assign(candidates[0], IN):
+                    return None
+
+        else:  # la == UNDEC
+            # UNDEC => pas d'attaquant IN
+            if not attackers:
+                return None  # UNDEC impossible si aucun attaquant (ta règle "un_pas_out" échoue)
+
+            for b in attackers:
+                if labels.get(b) == IN:
+                    return None
+
+            # UNDEC => au moins un attaquant "pas OUT"
+            # Comme aucun attaquant IN autorisé, il faut au moins un attaquant UNDEC
+            if any(labels.get(b) == UNDEC for b in attackers):
+                continue  # satisfait
+
+            # candidats pouvant devenir UNDEC: ceux non assignés
+            candidates = [b for b in attackers if labels.get(b) is None]
+            # si tous OUT => contradiction
+            if not candidates:
+                return None
+
+            # si un seul candidat, force UNDEC
+            if len(candidates) == 1:
+                if not assign(candidates[0], UNDEC):
+                    return None
+
+    return labels
+
+
+def generate_valid_labelings(arguments, attacks_by, attacks_from=None, max_solutions=None):
+    """
+    Génère les labelings valides via backtracking + propagation + mémoïsation (DP).
+    Retourne une liste de tuples: (in_set, out_set, undec_set)
+
+    max_solutions: int ou None (si tu veux stopper après K solutions)
+    """
+    if attacks_from is None:
+        attacks_from = _build_attacks_from(arguments, attacks_by)
+
+    arguments = set(arguments)
+    results = []
+    dead_cache = set()  # DP : états sans solution (nogoods)
+
+    def state_key(labels):
+        in_s = frozenset(a for a, v in labels.items() if v == IN)
+        out_s = frozenset(a for a, v in labels.items() if v == OUT)
+        undec_s = frozenset(a for a, v in labels.items() if v == UNDEC)
+        return (in_s, out_s, undec_s)
+
+    def pick_var(labels):
+        """Heuristique: choisir un argument non assigné le plus contraint (le plus d'attaquants)."""
+        unassigned = [a for a in arguments if a not in labels]
+        # plus il a d'attaquants, plus c'est contraint (bonne heuristique)
+        return max(unassigned, key=lambda a: len(attacks_by.get(a, set())))
+
+    def dfs(labels):
+        # Stop si on a assez de solutions
+        if max_solutions is not None and len(results) >= max_solutions:
+            return
+
+        key = state_key(labels)
+        if key in dead_cache:
+            return
+
+        # Propagation
+        propagated = propagate_labels(arguments, attacks_by, attacks_from, init_labels=labels)
+        if propagated is None:
+            dead_cache.add(key)
+            return
+
+        # Terminé ?
+        if len(propagated) == len(arguments):
+            in_set = {a for a, v in propagated.items() if v == IN}
+            out_set = {a for a, v in propagated.items() if v == OUT}
+            undec_set = {a for a, v in propagated.items() if v == UNDEC}
+            labeling = (in_set, out_set, undec_set)
+
+            # Optionnel: double-check avec ta fonction
+            if labeling_est_valide(labeling):
+                results.append(labeling)
+            return
+
+        # Choix / backtracking
+        a = pick_var(propagated)
+
+        # Ordre des essais (souvent IN/OUT d’abord pour propager fort)
+        for v in (IN, OUT, UNDEC):
+            new_labels = dict(propagated)
+            new_labels[a] = v
+            dfs(new_labels)
+
+            if max_solutions is not None and len(results) >= max_solutions:
+                return
+
+        # Si aucune solution trouvée depuis cet état propagé, mémoriser
+        if len(results) == 0 or (max_solutions is None):
+            # Nogood utile surtout quand on explore "tout"
+            dead_cache.add(state_key(propagated))
+
+    dfs({})
+    return results
+##=================================================================================================
 
 
 def get_extensions_preferee(labels_valides):
@@ -179,7 +323,7 @@ def get_extensions_preferee(labels_valides):
 
 # Verify Extension
 if (request == "VE-PR"):
-    valids = generate_valid_labelings(arguments, attacks_by)
+    valids = generate_valid_labelings(arguments, attacks_by, attacks_from, max_solutions=1)
     extensions_preferee = get_extensions_preferee(valids)
     result = False
     for ext in extensions_preferee:
@@ -199,7 +343,7 @@ elif (request == "VE-ST"):
         
 # Decide the Credulous acceptability de l’argument
 elif (request == "DC-PR"):
-    valids = generate_valid_labelings(arguments, attacks_by)
+    valids = generate_valid_labelings(arguments, attacks_by, attacks_from, max_solutions=1)
     extensions_preferee = get_extensions_preferee(valids)
     result = False
     for ext in extensions_preferee:
@@ -212,7 +356,7 @@ elif (request == "DC-PR"):
         print("NO")
         
 elif (request == "DC-ST"):
-    valids = generate_valid_labelings(arguments, attacks_by)
+    valids = generate_valid_labelings(arguments, attacks_by, attacks_from, max_solutions=1)
     extensions_stable = [label[0] for label in valids if label[2] == set()]
     result = False
     for ext in extensions_stable:
@@ -225,13 +369,14 @@ elif (request == "DC-ST"):
 
 #Decide the Skeptical acceptability de l’argument
 elif (request == "DS-PR"):
-    valids = generate_valid_labelings(arguments, attacks_by)
+    valids = generate_valid_labelings(arguments, attacks_by, attacks_from, max_solutions=1)
     extensions_preferee = get_extensions_preferee(valids)
     result = True
     if extensions_preferee == []:
         result = False
+        
     for ext in extensions_preferee:
-        if args_to_check < ext:
+        if not(args_to_check <= ext):
             result = False
     if result:
         print("YES")
@@ -239,7 +384,7 @@ elif (request == "DS-PR"):
         print("NO")
     
 elif (request == "DS-ST"):
-    valids = generate_valid_labelings(arguments, attacks_by)
+    valids = generate_valid_labelings(arguments, attacks_by, attacks_from, max_solutions=1)
     extensions_stable = [label[0] for label in valids if label[2] == set()]
     
     result = True
