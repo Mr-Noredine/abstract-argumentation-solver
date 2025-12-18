@@ -2,16 +2,11 @@ import sys
 import re
 
 if sys.argv[1] == "-p":
-    semantics = sys.argv[2]
+    request = sys.argv[2]
 if sys.argv[3] == "-f":
     file_name = sys.argv[4]
 if sys.argv[5] == "-a":
-    args_to_check = sys.argv[6].split(",")
-
-
-print(f"Request: {semantics}")
-print(f"File name: {file_name}")
-print(f"Arguments to verify: {args_to_check}")
+    args_to_check = set(sys.argv[6].split(","))
 
 
 with open(file_name, 'r') as fd:
@@ -36,7 +31,38 @@ for line in lines:
         attacks_from[regex2.group(1)].add(regex2.group(2))
         attacks_by[regex2.group(2)].add(regex2.group(1))
  
-print(f"Arguments: {arguments}")
-print(f"Attacks: {attacks}")
-print(f"Attacks from: {attacks_from}")
-print(f"Attacks by: {attacks_by}")
+
+
+def est_sans_conflit(ensemble):
+    for a in ensemble:
+        for b in ensemble:
+            if a != b and (a, b) in attacks:
+                return False
+    return True
+
+
+def est_extension_stable(ensemble):
+    if not(est_sans_conflit(ensemble)):
+        return False
+    for arg in arguments:
+        if arg not in ensemble:
+            attackers = attacks_by.get(arg, set())
+            if ensemble.isdisjoint(attackers):
+                return False
+    return True
+   
+
+
+if (request == "VE-PR"):
+    pass
+elif (request == "VE-ST"):
+    if est_extension_stable(args_to_check):
+        print("YES")
+elif (request == "DC-PR"):
+    pass
+elif (request == "DC-ST"):
+    pass
+elif (request == "DS-PR"):
+    pass
+elif (request == "DS-ST"):
+    pass
