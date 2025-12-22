@@ -11,6 +11,6 @@ att(B,C).
 att(C,D).
 att(D,E).
 att(E,F).
-att(F,A).
+
 
 

@@ -97,7 +97,7 @@ def propagate(label, start, labeled):
             else:
                 blockage.append(u)
                 continue
-        for v in attacks_from.get(u, set()):
+        for v in sorted(attacks_from.get(u, set())):
             if v not in visited:
                 stack.append(v)
     return visited, blockage
@@ -119,14 +119,15 @@ def generate_valide_labelings(arguments, attacks_by, attacks_from):
             visited |= v
             blockage += b
     def explore(label, labeled, visited, blockage): 
-        if not (set(arguments) - visited) and labeling_est_valide(label):
-            labelings.append((set(label[0]), set(label[1]), set(label[2])))
+        if not (set(arguments) - visited):
+            if labeling_est_valide(label):
+                labelings.append((set(label[0]), set(label[1]), set(label[2])))
             return
         
         if blockage:
             u = blockage.pop()
         else:
-            u = next(iter(set(arguments) - visited)) 
+            u = sorted(set(arguments) - visited)[0]
         
         # branche 1 : IN  
         visited1 = set(visited)
