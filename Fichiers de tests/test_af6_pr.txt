@@ -1,0 +1,4 @@
+Preferred extensions:
+[A,C,D]
+[A,E,F]
+
