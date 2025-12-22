@@ -129,6 +129,12 @@ def generate_valide_labelings(arguments, attacks_by, attacks_from):
         else:
             u = sorted(set(arguments) - visited)[0]
         
+        # branche 0 : Undec 
+        visited0 = set(visited)
+        visited0.add(u)
+        blockage0 = list(blockage)
+        explore(label, labeled, visited0, blockage0)
+        
         # branche 1 : IN  
         visited1 = set(visited)
         blockage1 = list(blockage)
@@ -194,10 +200,21 @@ def labeling_est_valide(labeling):
 def get_extensions_preferee(labels_valides):
     extension_complete = [label[0] for label in labels_valides]
     extension_maximales = []
-
+    
+    # enlever doublons
+    extension_complete_sans_doublons = []
     for ext in extension_complete:
+        existe = False
+        for e in extension_complete_sans_doublons:
+            if ext == e:
+                existe = True
+                break
+        if not existe:
+            extension_complete_sans_doublons.append(ext)
+        
+    for ext in extension_complete_sans_doublons:
         est_maximale = True
-        for autre in extension_complete:
+        for autre in extension_complete_sans_doublons:
             if ext < autre:          
                 est_maximale = False
                 break

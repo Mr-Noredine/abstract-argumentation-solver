@@ -1,10 +1,10 @@
 import random
 
-def make_hard_af(n=1000, k=10, seed=42,
+def make_hard_af(n=50, k=10, seed=42,
                  intra_cycle_chords=3,      # densifie chaque cycle
                  intra_random_edges=8,       # edges aléatoires intra-cluster par noeud (moyenne)
                  inter_ring_links=6,         # liens entre clusters pour créer cycles globaux
-                 inter_random_edges=4000,    # edges aléatoires inter-clusters
+                 inter_random_edges=40,    # edges aléatoires inter-clusters
                  self_attacks=50):           # quelques auto-attaques
     """
     Génère un AF "dur" :
@@ -88,19 +88,19 @@ def write_apx(filename, args, attacks):
         for (u, v) in sorted(attacks):
             f.write(f"att(a{u},a{v}).\n")
 
-
+import sys
 if __name__ == "__main__":
     args, attacks = make_hard_af(
-        n=1000,
+        n=int(sys.argv[1]),
         k=10,
         seed=42,
         intra_cycle_chords=4,
         intra_random_edges=6,
         inter_ring_links=8,
-        inter_random_edges=5000,
+        inter_random_edges=int(sys.argv[1]),
         self_attacks=80
     )
-    out = "hard_1000.apx"
+    out = f"hard_{sys.argv[1]}.apx"
     write_apx(out, args, attacks)
     print("OK ->", out, "| args:", len(args), "| attacks:", len(attacks))
 
