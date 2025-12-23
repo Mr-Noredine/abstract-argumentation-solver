@@ -107,59 +107,70 @@ def generate_valide_labelings(arguments, attacks_by, attacks_from):
     arguments = list(arguments)
     labeled = {arg: False for arg in arguments}
     label = (set(), set(), set(arguments))
-    visited = set()
-    blockage = []
-    
+
     args_without_attakers = get_arguemnts_without_attakers(arguments, attacks_by)
-    
     if args_without_attakers != []:
         for a in args_without_attakers:
             transform_as_in(label, a, labeled)
-            v, b = propagate(label, a , labeled)
-            visited |= v
-            blockage += b
-    def explore(label, labeled, visited, blockage): 
-        if not (set(arguments) - visited):
+
+    def propagate_global(label, labeled):
+        changed = True
+        while changed:
+            changed = False
+            for u in list(label[2]):  # uniquement UNDEC
+                if labeled.get(u, False):
+                    continue
+                attackers = attacks_by.get(u, set())
+
+                if not attackers:
+                    transform_as_in(label, u, labeled)
+                    changed = True
+                    continue
+
+                if all(is_out(b, label) for b in attackers):
+                    transform_as_in(label, u, labeled)
+                    changed = True
+                    continue
+
+                if any(is_in(b, label) for b in attackers):
+                    transform_as_out(label, u, labeled)
+                    changed = True
+                    continue
+
+        blockage = sorted(list(label[2]))
+        return blockage
+
+    def explore(label, labeled):
+        blockage = propagate_global(label, labeled)
+
+        # plus de blocage => soit solution, soit on stop
+        if not blockage:
             if labeling_est_valide(label):
                 labelings.append((set(label[0]), set(label[1]), set(label[2])))
             return
-        
-        if blockage:
-            u = blockage.pop()
-        else:
-            u = sorted(set(arguments) - visited)[0]
-        
-        # branche 0 : Undec 
-        visited0 = set(visited)
-        visited0.add(u)
-        blockage0 = list(blockage)
-        explore(label, labeled, visited0, blockage0)
-        
-        # branche 1 : IN  
-        visited1 = set(visited)
-        blockage1 = list(blockage)
+
+        u = blockage[0]  # choix déterministe
+
+        # branche 0 : UNDEC (on "fixe" u en UNDEC en l'enlevant du choix)
+        label0 = (set(label[0]), set(label[1]), set(label[2]))
+        labeled0 = dict(labeled)
+        labeled0[u] = True  # marqué traité, reste dans label0[2]
+        label0[2].discard(u)
+        explore(label0, labeled0)
+
+        # branche 1 : IN
         label1 = (set(label[0]), set(label[1]), set(label[2]))
         labeled1 = dict(labeled)
-        
         transform_as_in(label1, u, labeled1)
-        v1, b1 = propagate(label1, u, labeled1)
-        visited1 |= v1
-        blockage1 += b1
-        explore(label1, labeled1, visited1, blockage1)
-        
-        # branche 2: OUT
-        blockage2 = list(blockage)
-        visited2 = set(visited)
+        explore(label1, labeled1)
+
+        # branche 2 : OUT
         label2 = (set(label[0]), set(label[1]), set(label[2]))
         labeled2 = dict(labeled)
-                
         transform_as_out(label2, u, labeled2)
-        v2, b2 = propagate(label2, u, labeled2)
-        visited2 |= v2
-        blockage2 += b2
-        explore(label2, labeled2, visited2, blockage2)
-        
-    explore(label, labeled, visited, blockage)
+        explore(label2, labeled2)
+
+    explore(label, labeled)
     return labelings
 
      
@@ -222,9 +233,10 @@ def get_extensions_preferee(labels_valides):
             extension_maximales.append(ext)
     return extension_maximales
     
-
+import time
 # Verify Extension
 if (request == "VE-PR"):
+    start = time.perf_counter()
     valids = generate_valide_labelings(arguments, attacks_by, attacks_from)
     extensions_preferee = get_extensions_preferee(valids)
     print("Extension preferee: ")
@@ -238,7 +250,8 @@ if (request == "VE-PR"):
         print("YES")
     else:
         print("NO")
-            
+    end = time.perf_counter() 
+    print(f"time (s): {end - start}")    
         
 elif (request == "VE-ST"):
     if est_extension_stable(args_to_check):
